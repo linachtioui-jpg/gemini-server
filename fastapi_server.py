@@ -16,6 +16,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import uvicorn
 import google.generativeai as genai
+import urllib.request
+import urllib.parse
+import ssl
 
 # Configure logging for production use
 logging.basicConfig(
@@ -33,23 +36,98 @@ HOST = '0.0.0.0'  # Binds to all interfaces for router port forwarding
 PORT = 6000  # HTTP port
 WORKERS = 4  # Number of worker processes
 
-# Gemini API configuration
+# AI provider configuration
+# By default the server looks for `GEMINI_API_KEY` env var. You can switch provider by setting
+# `AI_PROVIDER=openai` or `USE_OPENAI=1` to use an OpenAI API key stored in the same env var.
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    # Use gemini-2.0-flash (latest) or gemini-1.5-pro as fallback
-    try:
-        GEMINI_MODEL = genai.GenerativeModel('gemini-2.0-flash')
-        logger.info("Gemini API configured successfully with gemini-2.0-flash")
-    except Exception:
-        try:
-            GEMINI_MODEL = genai.GenerativeModel('gemini-1.5-pro')
-            logger.info("Gemini API configured successfully with gemini-1.5-pro")
-        except Exception:
-            GEMINI_MODEL = genai.GenerativeModel('gemini-pro')
-            logger.info("Gemini API configured with gemini-pro (legacy)")
+AI_PROVIDER = os.getenv('AI_PROVIDER', '').lower()
+USE_OPENAI = os.getenv('USE_OPENAI', '0').lower() in ('1', 'true', 'yes')
+
+# Determine provider: 'openai' or 'gemini'
+if USE_OPENAI and GEMINI_API_KEY:
+    AI_PROVIDER = 'openai'
+
+if AI_PROVIDER == 'openai':
+    OPENAI_API_KEY = GEMINI_API_KEY
+    if not OPENAI_API_KEY:
+        logger.warning('AI_PROVIDER=openai but GEMINI_API_KEY is not set')
+    else:
+        logger.info('Configured to use OpenAI via GEMINI_API_KEY')
+    GEMINI_MODEL = None
 else:
-    logger.warning("GEMINI_API_KEY environment variable not set - Gemini features disabled")
+    # Default to Gemini if key present
+    if GEMINI_API_KEY:
+        genai.configure(api_key=GEMINI_API_KEY)
+        # Try modern models with fallbacks
+        try:
+            GEMINI_MODEL = genai.GenerativeModel('gemini-2.0-flash')
+            logger.info('Gemini API configured successfully with gemini-2.0-flash')
+        except Exception:
+            try:
+                GEMINI_MODEL = genai.GenerativeModel('gemini-1.5-pro')
+                logger.info('Gemini API configured successfully with gemini-1.5-pro')
+            except Exception:
+                try:
+                    GEMINI_MODEL = genai.GenerativeModel('gemini-pro')
+                    logger.info('Gemini API configured with gemini-pro (legacy)')
+                except Exception:
+                    GEMINI_MODEL = None
+                    logger.warning('Failed to initialize any Gemini model')
+    else:
+        GEMINI_MODEL = None
+        logger.warning('GEMINI_API_KEY environment variable not set - Gemini features disabled')
+
+
+def call_openai_api(prompt: str, model: str = 'gpt-4o-mini') -> str:
+    """
+    Call OpenAI Chat Completions via REST and return the assistant text.
+    Uses the API key provided in `OPENAI_API_KEY` (stored in `GEMINI_API_KEY`).
+    """
+    if not OPENAI_API_KEY:
+        raise RuntimeError('OpenAI API key not configured')
+
+    url = 'https://api.openai.com/v1/chat/completions'
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {OPENAI_API_KEY}'
+    }
+    body = {
+        'model': model,
+        'messages': [
+            {'role': 'system', 'content': 'You are a helpful assistant.'},
+            {'role': 'user', 'content': prompt}
+        ],
+        'max_tokens': 512,
+        'temperature': 0.2
+    }
+
+    data = json.dumps(body).encode('utf-8')
+    req = urllib.request.Request(url, data=data, headers=headers, method='POST')
+    # Use default SSL context
+    ctx = ssl.create_default_context()
+    with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
+        resp_data = resp.read().decode('utf-8')
+        parsed = json.loads(resp_data)
+        # Extract first assistant message text
+        try:
+            return parsed['choices'][0]['message']['content']
+        except Exception:
+            # Fall back to whole response if structure differs
+            return parsed.get('choices', [{}])[0].get('text') or json.dumps(parsed)
+
+
+def get_ai_response(prompt: str) -> str:
+    """
+    Provider-agnostic helper that returns AI text response from the configured provider.
+    """
+    if AI_PROVIDER == 'openai':
+        return call_openai_api(prompt)
+    else:
+        if not GEMINI_MODEL:
+            raise RuntimeError('Gemini model not configured')
+        # Use Gemini SDK
+        resp = GEMINI_MODEL.generate_content(prompt)
+        return getattr(resp, 'text', None) or str(resp)
 
 # Create FastAPI application
 app = FastAPI(
