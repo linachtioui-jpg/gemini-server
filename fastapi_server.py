@@ -39,6 +39,7 @@ WORKERS = 4  # Number of worker processes
 # AI provider configuration
 # By default the server looks for `GEMINI_API_KEY` env var. You can switch provider by setting
 # `AI_PROVIDER=openai` or `USE_OPENAI=1` to use an OpenAI API key stored in the same env var.
+OPENAI_API_KEY = None
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 AI_PROVIDER = os.getenv('AI_PROVIDER', '').lower()
 USE_OPENAI = os.getenv('USE_OPENAI', '0').lower() in ('1', 'true', 'yes')
@@ -338,12 +339,11 @@ async def ai_prompt(request: Request) -> JSONResponse:
         
         logger.info(f"AI Request from {client_host}:{client_port}: {prompt[:100]}")
         
-        # Send to Gemini API
+        # Get AI response from configured provider
         try:
-            response = GEMINI_MODEL.generate_content(prompt)
-            ai_response = response.text if response.text else "No response generated"
+            ai_response = get_ai_response(prompt)
         except Exception as e:
-            logger.error(f"Gemini API error: {e}", exc_info=True)
+            logger.error(f"AI provider error: {e}", exc_info=True)
             return JSONResponse(
                 status_code=500,
                 content={
@@ -406,10 +406,9 @@ async def ai_prompt_get(prompt: Optional[str] = None, id: Optional[str] = None, 
         logger.info(f"AI GET Request from {client_host}:{client_port}: {prompt[:100]}")
 
         try:
-            response = GEMINI_MODEL.generate_content(prompt)
-            ai_response = response.text if response.text else "No response generated"
+            ai_response = get_ai_response(prompt)
         except Exception as e:
-            logger.error(f"Gemini API error (GET): {e}", exc_info=True)
+            logger.error(f"AI provider error (GET): {e}", exc_info=True)
             return JSONResponse(
                 status_code=500,
                 content={"type": "error", "status": "ai_error", "message": str(e)}
