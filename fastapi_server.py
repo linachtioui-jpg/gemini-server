@@ -297,6 +297,64 @@ async def ai_prompt(request: Request) -> JSONResponse:
         )
 
 
+@app.get("/ai")
+async def ai_prompt_get(prompt: Optional[str] = None, id: Optional[str] = None, request: Request | None = None) -> JSONResponse:
+    """
+    Convenience GET endpoint for testing the AI endpoint from browsers/health checks.
+    Use query parameters: ?prompt=...&id=...
+    Returns same payload as POST /ai.
+    """
+    try:
+        if not GEMINI_API_KEY:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "type": "error",
+                    "status": "gemini_not_configured",
+                    "message": "Gemini API is not configured"
+                }
+            )
+
+        client_host = request.client.host if request and request.client else "unknown"
+        client_port = request.client.port if request and request.client else 0
+
+        if not prompt:
+            logger.warning(f"No prompt provided for GET /ai from {client_host}:{client_port}")
+            return JSONResponse(
+                status_code=400,
+                content={"type": "error", "status": "missing_prompt"}
+            )
+
+        logger.info(f"AI GET Request from {client_host}:{client_port}: {prompt[:100]}")
+
+        try:
+            response = GEMINI_MODEL.generate_content(prompt)
+            ai_response = response.text if response.text else "No response generated"
+        except Exception as e:
+            logger.error(f"Gemini API error (GET): {e}", exc_info=True)
+            return JSONResponse(
+                status_code=500,
+                content={"type": "error", "status": "ai_error", "message": str(e)}
+            )
+
+        ack = {
+            "type": "ai_response",
+            "status": "ok",
+            "response": ai_response,
+            "timestamp": datetime.utcnow().isoformat() + 'Z'
+        }
+
+        if id:
+            ack["message_id"] = id
+
+        logger.info(f"AI GET Response sent to {client_host}:{client_port}")
+        return JSONResponse(status_code=200, content=ack)
+
+    except Exception as e:
+        logger.error(f"Error in GET /ai endpoint: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"type": "error", "status": "server_error"})
+
+
 async def health_check() -> JSONResponse:
     """
     Health check endpoint for monitoring.
