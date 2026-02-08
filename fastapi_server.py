@@ -47,7 +47,7 @@ WORKERS = 4  # Number of worker processes
 OPENAI_API_KEY = None
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 AI_PROVIDER = os.getenv('AI_PROVIDER', '').lower()
-USE_OPENAI = 1
+USE_OPENAI = os.getenv('USE_OPENAI', '0').lower() in ('1', 'true', 'yes')
 
 # Determine provider: 'openai' or 'gemini'
 if USE_OPENAI and GEMINI_API_KEY:
@@ -97,6 +97,7 @@ def call_openai_api(prompt: str, model: str = 'gpt-4o-mini') -> str:
         'Content-Type': 'application/json',
         'Authorization': f'Bearer {OPENAI_API_KEY}'
     }
+
     body = {
         'model': model,
         'messages': [
@@ -109,67 +110,85 @@ def call_openai_api(prompt: str, model: str = 'gpt-4o-mini') -> str:
 
     data = json.dumps(body).encode('utf-8')
     req = urllib.request.Request(url, data=data, headers=headers, method='POST')
-    # Use default SSL context
     ctx = ssl.create_default_context()
-    with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
-        resp_data = resp.read().decode('utf-8')
-        parsed = json.loads(resp_data)
-        # Extract first assistant message text
+
+    max_retries = int(os.getenv('AI_MAX_RETRIES', '5'))
+    base_backoff = float(os.getenv('AI_BASE_BACKOFF', '0.5'))
+
+    for attempt in range(max_retries):
         try:
-            return parsed['choices'][0]['message']['content']
+            with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
+                resp_data = resp.read().decode('utf-8')
+                parsed = json.loads(resp_data)
+                try:
+                    return parsed['choices'][0]['message']['content']
+                except Exception:
+                    return parsed.get('choices', [{}])[0].get('text') or json.dumps(parsed)
+
+        except urllib.error.HTTPError as e:
+            # Handle rate limits (429) with Retry-After and exponential backoff
+            if getattr(e, 'code', None) == 429:
+                retry_after = None
+                try:
+                    retry_after = int(e.headers.get('Retry-After')) if e.headers else None
+                except Exception:
+                    retry_after = None
+
+                if retry_after:
+                    sleep_for = retry_after
+                else:
+                    jitter = random.uniform(0, base_backoff)
+                    sleep_for = min(60, base_backoff * (2 ** attempt) + jitter)
+
+                time.sleep(sleep_for)
+                continue
+            else:
+                raise
         except Exception:
-            # Fall back to whole response if structure differs
-            return parsed.get('choices', [{}])[0].get('text') or json.dumps(parsed)
+            jitter = random.uniform(0, base_backoff)
+            sleep_for = min(60, base_backoff * (2 ** attempt) + jitter)
+            time.sleep(sleep_for)
+            continue
+
+    raise RuntimeError('OpenAI API request failed after retries')
 
 
 def get_ai_response(prompt: str) -> str:
-                # Synchronous HTTP call with retries and exponential backoff
-                data = json.dumps(body).encode('utf-8')
-                req = urllib.request.Request(url, data=data, headers=headers, method='POST')
-                ctx = ssl.create_default_context()
+    """
+    Synchronous provider-agnostic helper (keeps compatibility).
+    Prefer using `async_get_ai_response` in async endpoints.
+    """
+    if AI_PROVIDER == 'openai':
+        return call_openai_api(prompt)
+    else:
+        if not GEMINI_MODEL:
+            raise RuntimeError('Gemini model not configured')
+        resp = GEMINI_MODEL.generate_content(prompt)
+        return getattr(resp, 'text', None) or str(resp)
 
-                max_retries = int(os.getenv('AI_MAX_RETRIES', '5'))
-                base_backoff = float(os.getenv('AI_BASE_BACKOFF', '0.5'))
 
-                for attempt in range(max_retries):
-                    try:
-                        with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
-                            resp_data = resp.read().decode('utf-8')
-                            parsed = json.loads(resp_data)
-                            try:
-                                return parsed['choices'][0]['message']['content']
-                            except Exception:
-                                return parsed.get('choices', [{}])[0].get('text') or json.dumps(parsed)
+# Concurrency limiter for outbound AI requests (async)
+AI_MAX_CONCURRENCY = int(os.getenv('AI_MAX_CONCURRENCY', '4'))
+ai_semaphore = asyncio.Semaphore(AI_MAX_CONCURRENCY)
 
-                    except urllib.error.HTTPError as e:
-                        # Handle rate limits (429) with Retry-After and exponential backoff
-                        if e.code == 429:
-                            retry_after = None
-                            try:
-                                retry_after = int(e.headers.get('Retry-After')) if e.headers else None
-                            except Exception:
-                                retry_after = None
 
-                            if retry_after:
-                                sleep_for = retry_after
-                            else:
-                                jitter = random.uniform(0, base_backoff)
-                                sleep_for = min(60, base_backoff * (2 ** attempt) + jitter)
+async def async_call_openai(prompt: str, model: str = 'gpt-4o-mini') -> str:
+    async with ai_semaphore:
+        return await asyncio.to_thread(call_openai_api, prompt, model)
 
-                            time.sleep(sleep_for)
-                            continue
-                        else:
-                            # Re-raise other HTTP errors
-                            raise
-                    except Exception:
-                        # Network or parsing error: retry with backoff
-                        jitter = random.uniform(0, base_backoff)
-                        sleep_for = min(60, base_backoff * (2 ** attempt) + jitter)
-                        time.sleep(sleep_for)
-                        continue
 
-                # Exhausted retries
-                raise RuntimeError('OpenAI API request failed after retries')
+async def async_call_gemini(prompt: str) -> str:
+    if not GEMINI_MODEL:
+        raise RuntimeError('Gemini model not configured')
+    async with ai_semaphore:
+        return await asyncio.to_thread(lambda p: getattr(GEMINI_MODEL.generate_content(p), 'text', None) or str(GEMINI_MODEL.generate_content(p)), prompt)
+
+
+async def async_get_ai_response(prompt: str) -> str:
+    if AI_PROVIDER == 'openai':
+        return await async_call_openai(prompt)
+    else:
+        return await async_call_gemini(prompt)
 app = FastAPI(
     title="UE5 VaRest Server",
     description="REST API for UE5 VaRest Plugin",
@@ -343,15 +362,12 @@ async def ai_prompt(request: Request) -> JSONResponse:
         JSONResponse with AI response
     """
     try:
-        if not GEMINI_API_KEY:
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "type": "error",
-                    "status": "gemini_not_configured",
-                    "message": "Gemini API is not configured"
-                }
-            )
+        if AI_PROVIDER == 'openai':
+            if not OPENAI_API_KEY:
+                return JSONResponse(status_code=503, content={"type":"error","status":"ai_not_configured","message":"OpenAI API key not configured"})
+        else:
+            if not GEMINI_MODEL:
+                return JSONResponse(status_code=503, content={"type":"error","status":"ai_not_configured","message":"Gemini model not configured"})
         
         client_host = request.client.host if request.client else "unknown"
         client_port = request.client.port if request.client else 0
@@ -378,19 +394,12 @@ async def ai_prompt(request: Request) -> JSONResponse:
         
         logger.info(f"AI Request from {client_host}:{client_port}: {prompt[:100]}")
         
-        # Get AI response from configured provider
+        # Get AI response from configured provider (async)
         try:
-            ai_response = get_ai_response(prompt)
+            ai_response = await async_get_ai_response(prompt)
         except Exception as e:
             logger.error(f"AI provider error: {e}", exc_info=True)
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "type": "error",
-                    "status": "ai_error",
-                    "message": str(e)
-                }
-            )
+            return JSONResponse(status_code=500, content={"type":"error","status":"ai_error","message":str(e)})
         
         ack = {
             "type": "ai_response",
@@ -422,15 +431,12 @@ async def ai_prompt_get(prompt: Optional[str] = None, id: Optional[str] = None, 
     Returns same payload as POST /ai.
     """
     try:
-        if not GEMINI_API_KEY:
-            return JSONResponse(
-                status_code=503,
-                content={
-                    "type": "error",
-                    "status": "gemini_not_configured",
-                    "message": "Gemini API is not configured"
-                }
-            )
+        if AI_PROVIDER == 'openai':
+            if not OPENAI_API_KEY:
+                return JSONResponse(status_code=503, content={"type":"error","status":"ai_not_configured","message":"OpenAI API key not configured"})
+        else:
+            if not GEMINI_MODEL:
+                return JSONResponse(status_code=503, content={"type":"error","status":"ai_not_configured","message":"Gemini model not configured"})
 
         client_host = request.client.host if request and request.client else "unknown"
         client_port = request.client.port if request and request.client else 0
@@ -445,13 +451,10 @@ async def ai_prompt_get(prompt: Optional[str] = None, id: Optional[str] = None, 
         logger.info(f"AI GET Request from {client_host}:{client_port}: {prompt[:100]}")
 
         try:
-            ai_response = get_ai_response(prompt)
+            ai_response = await async_get_ai_response(prompt)
         except Exception as e:
             logger.error(f"AI provider error (GET): {e}", exc_info=True)
-            return JSONResponse(
-                status_code=500,
-                content={"type": "error", "status": "ai_error", "message": str(e)}
-            )
+            return JSONResponse(status_code=500, content={"type":"error","status":"ai_error","message":str(e)})
 
         ack = {
             "type": "ai_response",
