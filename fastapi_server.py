@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
 """
-Production-ready FastAPI Server for UE5 VaRest Plugin
-Listens on 0.0.0.0:6000, handles JSON requests, and sends responses.
+Production-ready FastAPI Server for UE5 VaRest Plugin with Gemini AI
+Listens on 0.0.0.0:6000, handles JSON requests, integrates with Google Gemini API.
 Designed for router port forwarding and multiple concurrent clients.
 """
 
 import json
 import logging
 import sys
+import os
 from datetime import datetime
 from typing import Optional, Dict, Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import uvicorn
+import google.generativeai as genai
 
 # Configure logging for production use
 logging.basicConfig(
@@ -30,6 +32,15 @@ logger = logging.getLogger(__name__)
 HOST = '0.0.0.0'  # Binds to all interfaces for router port forwarding
 PORT = 6000  # HTTP port
 WORKERS = 4  # Number of worker processes
+
+# Gemini API configuration
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    GEMINI_MODEL = genai.GenerativeModel('gemini-pro')
+    logger.info("Gemini API configured successfully")
+else:
+    logger.warning("GEMINI_API_KEY environment variable not set - Gemini features disabled")
 
 # Create FastAPI application
 app = FastAPI(
@@ -186,7 +197,97 @@ async def receive_data(request: Request) -> JSONResponse:
         )
 
 
-@app.get("/health")
+@app.post("/ai")
+async def ai_prompt(request: Request) -> JSONResponse:
+    """
+    Send a prompt to Gemini AI and get a response.
+    Endpoint: POST /ai
+    
+    Expected JSON body:
+    {
+        "prompt": "Your question or prompt here",
+        "id": "optional_message_id"
+    }
+    
+    Args:
+        request: FastAPI request object containing JSON payload
+    
+    Returns:
+        JSONResponse with AI response
+    """
+    try:
+        if not GEMINI_API_KEY:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "type": "error",
+                    "status": "gemini_not_configured",
+                    "message": "Gemini API is not configured"
+                }
+            )
+        
+        client_host = request.client.host if request.client else "unknown"
+        client_port = request.client.port if request.client else 0
+        
+        try:
+            payload = await request.json()
+        except json.JSONDecodeError:
+            logger.warning(f"Invalid JSON from {client_host}:{client_port}")
+            return JSONResponse(
+                status_code=400,
+                content={"type": "error", "status": "invalid_json"}
+            )
+        
+        # Extract prompt
+        prompt = payload.get("prompt")
+        if not prompt or not isinstance(prompt, str):
+            logger.warning(f"No valid prompt from {client_host}:{client_port}")
+            return JSONResponse(
+                status_code=400,
+                content={"type": "error", "status": "missing_prompt"}
+            )
+        
+        message_id = payload.get("id")
+        
+        logger.info(f"AI Request from {client_host}:{client_port}: {prompt[:100]}")
+        
+        # Send to Gemini API
+        try:
+            response = GEMINI_MODEL.generate_content(prompt)
+            ai_response = response.text if response.text else "No response generated"
+        except Exception as e:
+            logger.error(f"Gemini API error: {e}", exc_info=True)
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "type": "error",
+                    "status": "ai_error",
+                    "message": str(e)
+                }
+            )
+        
+        ack = {
+            "type": "ai_response",
+            "status": "ok",
+            "response": ai_response,
+            "timestamp": datetime.utcnow().isoformat() + 'Z'
+        }
+        
+        if message_id:
+            ack["message_id"] = message_id
+        
+        logger.info(f"AI Response sent to {client_host}:{client_port}")
+        
+        return JSONResponse(status_code=200, content=ack)
+    
+    except Exception as e:
+        logger.error(f"Error in /ai endpoint: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={"type": "error", "status": "server_error"}
+        )
+
+
 async def health_check() -> JSONResponse:
     """
     Health check endpoint for monitoring.
@@ -220,6 +321,7 @@ async def root() -> JSONResponse:
             "endpoints": {
                 "POST /message": "Main message receiver",
                 "POST /data": "Alternative data receiver",
+                "POST /ai": "Send prompt to Gemini AI",
                 "GET /health": "Health check",
                 "GET /": "API info"
             }
@@ -238,6 +340,7 @@ def run_server() -> None:
     logger.info("Endpoints:")
     logger.info("  POST /message - Receive JSON messages")
     logger.info("  POST /data    - Receive data")
+    logger.info("  POST /ai      - Send prompt to Gemini AI")
     logger.info("  GET /health   - Health check")
     logger.info("=" * 60)
     
