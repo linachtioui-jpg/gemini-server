@@ -1,0 +1,10 @@
+2026-02-08 02:48:33,380 - INFO - ============================================================
+2026-02-08 02:48:33,380 - INFO - FastAPI Server Initialization
+2026-02-08 02:48:33,381 - INFO - Binding to: 0.0.0.0:6000
+2026-02-08 02:48:33,381 - INFO - Workers: 4
+2026-02-08 02:48:33,381 - INFO - Endpoints:
+2026-02-08 02:48:33,381 - INFO -   POST /message - Receive JSON messages
+2026-02-08 02:48:33,381 - INFO -   POST /data    - Receive data
+2026-02-08 02:48:33,381 - INFO -   GET /health   - Health check
+2026-02-08 02:48:33,381 - INFO - ============================================================
+2026-02-08 02:58:04,925 - INFO - FastAPI Server shutdown complete

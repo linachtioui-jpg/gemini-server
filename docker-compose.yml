@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  ue5-rest-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ue5-rest-server
+    ports:
+      - "6000:6000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:6000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - ue5-network
+
+networks:
+  ue5-network:
+    driver: bridge

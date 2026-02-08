@@ -1,0 +1,34 @@
+2026-02-08 02:02:51,165 - INFO - ============================================================
+2026-02-08 02:02:51,165 - INFO - UDP Server Initialization
+2026-02-08 02:02:51,165 - INFO - Binding to: 0.0.0.0:6000
+2026-02-08 02:02:51,165 - INFO - Buffer size: 4096 bytes
+2026-02-08 02:02:51,166 - INFO - Socket timeout: 30.0 seconds
+2026-02-08 02:02:51,166 - INFO - ============================================================
+2026-02-08 02:02:51,166 - INFO - UDP Server started on 0.0.0.0:6000
+2026-02-08 02:02:51,166 - INFO - Waiting for client messages (Ctrl+C to shutdown)...
+2026-02-08 02:15:30,492 - INFO - Received 4 bytes from 127.0.0.1:50121
+2026-02-08 02:15:30,517 - ERROR - Received invalid JSON format
+2026-02-08 02:15:30,537 - WARNING - Failed to parse message from 127.0.0.1:50121
+2026-02-08 02:15:30,596 - ERROR - Error receiving data: [WinError 10054] An existing connection was forcibly closed by the remote host
+2026-02-08 02:19:00,691 - INFO - Shutdown signal received (SIGINT)
+2026-02-08 02:19:00,692 - INFO - Server socket closed successfully
+2026-02-08 02:19:00,692 - INFO - UDP Server shutdown complete
+2026-02-08 02:19:11,576 - INFO - ============================================================
+2026-02-08 02:19:11,576 - INFO - UDP Server Initialization
+2026-02-08 02:19:11,577 - INFO - Binding to: 0.0.0.0:6000
+2026-02-08 02:19:11,577 - INFO - Buffer size: 4096 bytes
+2026-02-08 02:19:11,577 - INFO - Socket timeout: 30.0 seconds
+2026-02-08 02:19:11,577 - INFO - ============================================================
+2026-02-08 02:19:11,578 - INFO - UDP Server started on 0.0.0.0:6000
+2026-02-08 02:19:11,578 - INFO - Waiting for client messages (Ctrl+C to shutdown)...
+2026-02-08 02:19:41,587 - INFO - Shutdown signal received (SIGINT)
+2026-02-08 02:19:41,605 - INFO - Server socket closed successfully
+2026-02-08 02:19:41,606 - INFO - UDP Server shutdown complete
+2026-02-08 02:21:27,314 - INFO - ============================================================
+2026-02-08 02:21:27,314 - INFO - UDP Server Initialization
+2026-02-08 02:21:27,315 - INFO - Binding to: 0.0.0.0:6000
+2026-02-08 02:21:27,315 - INFO - Buffer size: 4096 bytes
+2026-02-08 02:21:27,315 - INFO - Socket timeout: 30.0 seconds
+2026-02-08 02:21:27,315 - INFO - ============================================================
+2026-02-08 02:21:27,316 - INFO - UDP Server started on 0.0.0.0:6000
+2026-02-08 02:21:27,316 - INFO - Waiting for client messages (Ctrl+C to shutdown)...
