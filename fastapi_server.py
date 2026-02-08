@@ -42,7 +42,7 @@ WORKERS = 4  # Number of worker processes
 OPENAI_API_KEY = None
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 AI_PROVIDER = os.getenv('AI_PROVIDER', '').lower()
-USE_OPENAI = os.getenv('USE_OPENAI', '0').lower() in ('1', 'true', 'yes')
+USE_OPENAI = 1
 
 # Determine provider: 'openai' or 'gemini'
 if USE_OPENAI and GEMINI_API_KEY:
