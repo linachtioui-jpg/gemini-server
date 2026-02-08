@@ -298,7 +298,7 @@ async def ai_prompt(request: Request) -> JSONResponse:
 
 
 @app.get("/ai")
-async def ai_prompt_get(prompt: Optional[str] = None, id: Optional[str] = None, request: Request | None = None) -> JSONResponse:
+async def ai_prompt_get(prompt: Optional[str] = None, id: Optional[str] = None, request: Request = None) -> JSONResponse:
     """
     Convenience GET endpoint for testing the AI endpoint from browsers/health checks.
     Use query parameters: ?prompt=...&id=...
