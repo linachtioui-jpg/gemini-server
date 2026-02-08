@@ -11,6 +11,11 @@ import sys
 import os
 from datetime import datetime
 from typing import Optional, Dict, Any
+import random
+import time
+import asyncio
+import ssl
+
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -118,19 +123,53 @@ def call_openai_api(prompt: str, model: str = 'gpt-4o-mini') -> str:
 
 
 def get_ai_response(prompt: str) -> str:
-    """
-    Provider-agnostic helper that returns AI text response from the configured provider.
-    """
-    if AI_PROVIDER == 'openai':
-        return call_openai_api(prompt)
-    else:
-        if not GEMINI_MODEL:
-            raise RuntimeError('Gemini model not configured')
-        # Use Gemini SDK
-        resp = GEMINI_MODEL.generate_content(prompt)
-        return getattr(resp, 'text', None) or str(resp)
+                # Synchronous HTTP call with retries and exponential backoff
+                data = json.dumps(body).encode('utf-8')
+                req = urllib.request.Request(url, data=data, headers=headers, method='POST')
+                ctx = ssl.create_default_context()
 
-# Create FastAPI application
+                max_retries = int(os.getenv('AI_MAX_RETRIES', '5'))
+                base_backoff = float(os.getenv('AI_BASE_BACKOFF', '0.5'))
+
+                for attempt in range(max_retries):
+                    try:
+                        with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
+                            resp_data = resp.read().decode('utf-8')
+                            parsed = json.loads(resp_data)
+                            try:
+                                return parsed['choices'][0]['message']['content']
+                            except Exception:
+                                return parsed.get('choices', [{}])[0].get('text') or json.dumps(parsed)
+
+                    except urllib.error.HTTPError as e:
+                        # Handle rate limits (429) with Retry-After and exponential backoff
+                        if e.code == 429:
+                            retry_after = None
+                            try:
+                                retry_after = int(e.headers.get('Retry-After')) if e.headers else None
+                            except Exception:
+                                retry_after = None
+
+                            if retry_after:
+                                sleep_for = retry_after
+                            else:
+                                jitter = random.uniform(0, base_backoff)
+                                sleep_for = min(60, base_backoff * (2 ** attempt) + jitter)
+
+                            time.sleep(sleep_for)
+                            continue
+                        else:
+                            # Re-raise other HTTP errors
+                            raise
+                    except Exception:
+                        # Network or parsing error: retry with backoff
+                        jitter = random.uniform(0, base_backoff)
+                        sleep_for = min(60, base_backoff * (2 ** attempt) + jitter)
+                        time.sleep(sleep_for)
+                        continue
+
+                # Exhausted retries
+                raise RuntimeError('OpenAI API request failed after retries')
 app = FastAPI(
     title="UE5 VaRest Server",
     description="REST API for UE5 VaRest Plugin",
