@@ -205,23 +205,26 @@ async def health_check() -> JSONResponse:
 
 
 @app.get("/")
-async def root() -> Dict[str, str]:
+async def root() -> JSONResponse:
     """
     Root endpoint with API information.
     
     Returns:
-        Dictionary with server information
+        JSON response with server information
     """
-    return {
-        "name": "UE5 VaRest Server",
-        "version": "1.0.0",
-        "endpoints": {
-            "POST /message": "Main message receiver",
-            "POST /data": "Alternative data receiver",
-            "GET /health": "Health check",
-            "GET /": "API info"
+    return JSONResponse(
+        status_code=200,
+        content={
+            "name": "UE5 VaRest Server",
+            "version": "1.0.0",
+            "endpoints": {
+                "POST /message": "Main message receiver",
+                "POST /data": "Alternative data receiver",
+                "GET /health": "Health check",
+                "GET /": "API info"
+            }
         }
-    }
+    )
 
 
 def run_server() -> None:
