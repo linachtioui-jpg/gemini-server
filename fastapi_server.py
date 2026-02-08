@@ -37,8 +37,17 @@ WORKERS = 4  # Number of worker processes
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    GEMINI_MODEL = genai.GenerativeModel('gemini-pro')
-    logger.info("Gemini API configured successfully")
+    # Use gemini-2.0-flash (latest) or gemini-1.5-pro as fallback
+    try:
+        GEMINI_MODEL = genai.GenerativeModel('gemini-2.0-flash')
+        logger.info("Gemini API configured successfully with gemini-2.0-flash")
+    except Exception:
+        try:
+            GEMINI_MODEL = genai.GenerativeModel('gemini-1.5-pro')
+            logger.info("Gemini API configured successfully with gemini-1.5-pro")
+        except Exception:
+            GEMINI_MODEL = genai.GenerativeModel('gemini-pro')
+            logger.info("Gemini API configured with gemini-pro (legacy)")
 else:
     logger.warning("GEMINI_API_KEY environment variable not set - Gemini features disabled")
 
